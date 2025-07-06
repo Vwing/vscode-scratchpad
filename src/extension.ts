@@ -45,135 +45,327 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
   <head>
     <style>
       ${css}
+      
+      /* Editor container styles */
+      #editor-container {
+        width: 100%;
+        ${savedHeight ? `height: ${savedHeight}px;` : 'height: 150px;'}
+        position: relative;
+        border: 1px solid var(--vscode-panel-border);
+        box-sizing: border-box;
+      }
+      
+      #editor-container:focus-within {
+        border-color: var(--vscode-focusBorder);
+      }
+      
+      /* CodeMirror 5 styles */
+      .CodeMirror {
+        height: 100% !important;
+        font-family: var(--vscode-editor-font-family, monospace) !important;
+        font-size: var(--vscode-editor-font-size, 13px) !important;
+        border: none !important;
+      }
+      
+      .CodeMirror-scroll {
+        padding: 8px !important;
+      }
+      
+      /* Hanging indent for wrapped lines */
+      .CodeMirror-wrap pre {
+        padding-left: 0;
+        text-indent: 0;
+      }
+      
+      .CodeMirror .CodeMirror-line {
+        text-indent: 0;
+      }
+      
+      .CodeMirror-wrap .CodeMirror-line > span {
+        padding-left: 0;
+      }
+      
+      .CodeMirror-cursor {
+        border-left-color: var(--vscode-editor-foreground) !important;
+      }
+      
+      .CodeMirror-selected {
+        background-color: var(--vscode-textPreformat-background) !important;
+      }
+      
+      .CodeMirror-focused .CodeMirror-selected {
+        background-color: var(--vscode-textPreformat-background) !important;
+      }
+      
+      /* Resize handle */
+      #resizer {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 20px;
+        height: 20px;
+        cursor: nwse-resize;
+        background: linear-gradient(135deg, transparent 50%, var(--vscode-scrollbarSlider-background) 50%);
+        z-index: 10;
+      }
+      
+      #resizer:hover {
+        background: linear-gradient(135deg, transparent 50%, var(--vscode-scrollbarSlider-hoverBackground) 50%);
+      }
     </style>
+    <!-- Load bundled CodeMirror that includes all dependencies -->
+    <script src="https://unpkg.com/codemirror@5.65.2/lib/codemirror.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/codemirror@5.65.2/lib/codemirror.css">
+    <!-- Load wrap mode addon for proper hanging indents -->
+    <script src="https://unpkg.com/codemirror@5.65.2/addon/wrap/hardwrap.js"></script>
   </head>
   <body style="margin:0;padding:0;overflow:hidden;">
-    <textarea
-      id="pad"
-      ${savedHeight ? '' : 'rows="6"'}
-      style="
-        width:100%;
-        box-sizing:border-box;
-        font-family:var(--vscode-editor-font-family);
-        font-size:var(--vscode-editor-font-size);
-        ${savedHeight ? `height:${savedHeight}px;` : ''}
-        resize:vertical;
-      "
-    >${escaped}</textarea>
+    <div id="editor-container">
+      <textarea id="editor">${escaped}</textarea>
+      <div id="resizer"></div>
+    </div>
 
     <script>
       const vscode = acquireVsCodeApi();
-      const pad = document.getElementById('pad');
+      const container = document.getElementById('editor-container');
+      const resizer = document.getElementById('resizer');
       const indentSize = ${indentSize};
       const indentStr = ' '.repeat(indentSize);
-
-      // Auto-save on any content change
-      pad.addEventListener('input', () => {
-        vscode.postMessage({ command: 'save', content: pad.value });
+      
+      // Initialize CodeMirror 5 (more stable for webviews)
+      const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+        lineNumbers: false,
+        lineWrapping: true,
+        indentUnit: indentSize,
+        tabSize: indentSize,
+        indentWithTabs: false,
+        theme: 'default',
+        mode: 'text/plain',
+        styleActiveLine: false,
+        viewportMargin: Infinity
       });
-
-      pad.addEventListener('keydown', e => {
-        const value = pad.value;
-        const sel = pad.selectionStart;
-        const lineStart = value.lastIndexOf('\\n', sel - 1) + 1;
-        const offset = sel - lineStart;
-
-        // count full leading spaces this line
-        let indentTotal = 0;
-        while (
-          indentTotal < value.length - lineStart &&
-          value[lineStart + indentTotal] === ' '
-        ) {
-          indentTotal++;
-        }
-
-        // 1) ENTER → preserve indent
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          const line = value.slice(lineStart, sel);
+      
+      // Custom hanging indent implementation
+      function updateHangingIndents() {
+        const wrapper = editor.getWrapperElement();
+        const lines = wrapper.querySelectorAll('.CodeMirror-line');
+        
+        lines.forEach((lineElement, index) => {
+          const lineText = editor.getLine(index);
+          if (!lineText) return;
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < lineText.length && lineText[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          if (leadingSpaces > 0) {
+            const indentPx = leadingSpaces * 7; // Approximate char width
+            lineElement.style.textIndent = \`-\${indentPx}px\`;
+            lineElement.style.paddingLeft = \`\${indentPx}px\`;
+          } else {
+            lineElement.style.textIndent = '';
+            lineElement.style.paddingLeft = '';
+          }
+        });
+      }
+      
+      // Update hanging indents on content change
+      editor.on('change', updateHangingIndents);
+      editor.on('refresh', updateHangingIndents);
+      
+      // Initial update
+      setTimeout(updateHangingIndents, 100);
+      
+      // Set height
+      editor.setSize('100%', '100%');
+      
+      // Apply custom styles
+      const isDark = ${isDarkTheme};
+      if (isDark) {
+        editor.getWrapperElement().style.backgroundColor = 'var(--vscode-editor-background)';
+        editor.getWrapperElement().style.color = 'var(--vscode-editor-foreground)';
+      } else {
+        editor.getWrapperElement().style.backgroundColor = 'var(--vscode-sideBar-background)';
+        editor.getWrapperElement().style.color = 'var(--vscode-sideBar-foreground)';
+      }
+      
+      // Remove gutter
+      editor.getWrapperElement().querySelector('.CodeMirror-gutters').style.display = 'none';
+      editor.getWrapperElement().querySelector('.CodeMirror-sizer').style.marginLeft = '0';
+      
+      // Auto-save on change
+      let saveTimeout;
+      editor.on('change', () => {
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+          vscode.postMessage({ command: 'save', content: editor.getValue() });
+        }, 300);
+      });
+      
+      // Smart indentation key bindings
+      editor.setOption('extraKeys', {
+        'Tab': (cm) => {
+          const cursor = cm.getCursor();
+          const line = cm.getLine(cursor.line);
+          const lineStart = cursor.ch;
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < line.length && line[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          // If cursor is at start of line or within leading indent, add indent at start
+          if (lineStart <= leadingSpaces) {
+            cm.replaceRange(indentStr, {line: cursor.line, ch: 0}, {line: cursor.line, ch: 0});
+            cm.setCursor({line: cursor.line, ch: cursor.ch + indentSize});
+          } else {
+            // Otherwise just insert spaces at cursor
+            cm.replaceSelection(indentStr);
+          }
+        },
+        
+        'Shift-Tab': (cm) => {
+          const cursor = cm.getCursor();
+          const line = cm.getLine(cursor.line);
+          const lineStart = cursor.ch;
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < line.length && line[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          // Only unindent if we have enough leading spaces and cursor is in indent region
+          if (leadingSpaces >= indentSize && lineStart <= leadingSpaces) {
+            cm.replaceRange('', {line: cursor.line, ch: 0}, {line: cursor.line, ch: indentSize});
+            const newCh = Math.max(0, cursor.ch - indentSize);
+            cm.setCursor({line: cursor.line, ch: newCh});
+          }
+        },
+        
+        'Enter': (cm) => {
+          const cursor = cm.getCursor();
+          const line = cm.getLine(cursor.line);
           const match = line.match(/^\\s*/);
           const indent = match ? match[0] : '';
-          const insert = '\\n' + indent;
-          pad.setRangeText(insert, sel, sel, 'end');
-          pad.selectionStart = pad.selectionEnd = sel + insert.length;
-
-        // 2) TAB / SHIFT+TAB → indent/unindent at start
-        } else if (e.key === 'Tab') {
-          e.preventDefault();
-          if (e.shiftKey) {
-            if (indentTotal >= indentSize) {
-              pad.setRangeText(
-                '',
-                lineStart,
-                lineStart + indentSize,
-                'start'
-              );
-              const newOffset = Math.max(0, offset - indentSize);
-              pad.selectionStart = pad.selectionEnd = lineStart + newOffset;
-            }
+          cm.replaceSelection('\\n' + indent);
+        },
+        
+        'Backspace': (cm) => {
+          const cursor = cm.getCursor();
+          const line = cm.getLine(cursor.line);
+          const offset = cursor.ch;
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < line.length && line[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          // If cursor is within indent region and we have enough spaces, delete chunk
+          if (offset > 0 && offset <= leadingSpaces && leadingSpaces >= indentSize) {
+            cm.replaceRange('', {line: cursor.line, ch: 0}, {line: cursor.line, ch: indentSize});
+            const newCh = Math.max(0, offset - indentSize);
+            cm.setCursor({line: cursor.line, ch: newCh});
           } else {
-            pad.setRangeText(indentStr, lineStart, lineStart, 'start');
-            pad.selectionStart = pad.selectionEnd = sel + indentSize;
+            // Default backspace behavior
+            return CodeMirror.Pass;
           }
-
-        // 3) BACKSPACE → chunk-delete in indent region
-        } else if (e.key === 'Backspace') {
-          if (offset > 0 && offset <= indentTotal && indentTotal >= indentSize) {
-            e.preventDefault();
-            pad.setRangeText(
-              '',
-              lineStart,
-              lineStart + indentSize,
-              'start'
-            );
+        },
+        
+        'Left': (cm) => {
+          const cursor = cm.getCursor();
+          const line = cm.getLine(cursor.line);
+          const offset = cursor.ch;
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < line.length && line[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          // If within indent region, move by chunks
+          if (offset > 0 && offset <= leadingSpaces) {
             const newOffset = Math.max(0, offset - indentSize);
-            pad.selectionStart = pad.selectionEnd = lineStart + newOffset;
+            cm.setCursor({line: cursor.line, ch: newOffset});
+          } else {
+            return CodeMirror.Pass;
           }
-          // else default backspace
-
-        // 4) / 5) Arrow keys → step by chunk in indent
-        } else if (
-          (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
-          !e.shiftKey && !e.ctrlKey && !e.altKey
-        ) {
-          const dir = e.key === 'ArrowLeft' ? -1 : +1;
-          if ((dir < 0 && offset > 0) || (dir > 0 && offset < indentTotal)) {
-            e.preventDefault();
-            const newOffset = Math.min(
-              indentTotal,
-              Math.max(0, offset + dir * indentSize)
-            );
-            pad.selectionStart = pad.selectionEnd = lineStart + newOffset;
+        },
+        
+        'Right': (cm) => {
+          const cursor = cm.getCursor();
+          const line = cm.getLine(cursor.line);
+          const offset = cursor.ch;
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < line.length && line[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          // If within indent region, move by chunks
+          if (offset < leadingSpaces) {
+            const newOffset = Math.min(leadingSpaces, offset + indentSize);
+            cm.setCursor({line: cursor.line, ch: newOffset});
+          } else {
+            return CodeMirror.Pass;
           }
         }
       });
 
-      // 6) CLICK inside indent → snap to nearest chunk
-      pad.addEventListener('mouseup', () => {
-        const sel = pad.selectionStart;
-        const value = pad.value;
-        const lineStart = value.lastIndexOf('\\n', sel - 1) + 1;
-        const offset = sel - lineStart;
-        let indentTotal = 0;
-        while (
-          indentTotal < value.length - lineStart &&
-          value[lineStart + indentTotal] === ' '
-        ) {
-          indentTotal++;
-        }
-        if (offset > 0 && offset < indentTotal) {
-          const nearest = Math.round(offset / indentSize) * indentSize;
-          pad.selectionStart = pad.selectionEnd = lineStart + nearest;
-        }
+      // Click-to-snap for indent boundaries
+      editor.on('cursorActivity', () => {
+        // Delay to allow click event to complete
+        setTimeout(() => {
+          const cursor = editor.getCursor();
+          const line = editor.getLine(cursor.line);
+          const offset = cursor.ch;
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < line.length && line[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          // If cursor is within indent region but not on boundary, snap to nearest
+          if (offset > 0 && offset < leadingSpaces) {
+            const nearest = Math.round(offset / indentSize) * indentSize;
+            editor.setCursor({line: cursor.line, ch: nearest});
+          }
+        }, 10);
+      });
+      
+      // Handle resizing
+      let isResizing = false;
+      let startY = 0;
+      let startHeight = 0;
+
+      resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = container.offsetHeight;
+        e.preventDefault();
       });
 
-      // 🔔 Watch for manual resize (drag-resize) and persist height
-      new ResizeObserver(entries => {
-        for (const e of entries) {
-          const h = Math.round(e.contentRect.height);
+      document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const deltaY = e.clientY - startY;
+        const newHeight = Math.max(100, startHeight + deltaY);
+        container.style.height = newHeight + 'px';
+        editor.setSize('100%', '100%'); // Refresh CodeMirror size
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isResizing) {
+          isResizing = false;
+          const h = container.offsetHeight;
           vscode.postMessage({ command: 'resize', height: h });
         }
-      }).observe(pad);
+      });
     </script>
   </body>
 </html>`;
@@ -196,21 +388,14 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
           color: var(--vscode-editor-foreground);
         }
         
-        #pad {
-          background-color: var(--vscode-editor-background);
-          color: var(--vscode-editor-foreground);
-          border: 1px solid var(--vscode-panel-border);
-          outline: none;
-          padding: 8px;
-          line-height: 1.4;
+        /* CodeMirror 5 styles for dark theme */
+        .CodeMirror {
+          background-color: var(--vscode-editor-background) !important;
+          color: var(--vscode-editor-foreground) !important;
         }
         
-        #pad:focus {
-          border-color: var(--vscode-focusBorder);
-        }
-        
-        #pad::selection {
-          background-color: var(--vscode-textPreformat-background);
+        .CodeMirror-lines {
+          color: var(--vscode-editor-foreground) !important;
         }
       `;
     } else {
@@ -220,21 +405,14 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
           color: var(--vscode-sideBar-foreground);
         }
         
-        #pad {
-          background-color: var(--vscode-sideBar-background);
-          color: var(--vscode-sideBar-foreground);
-          border: 1px solid var(--vscode-panel-border);
-          outline: none;
-          padding: 8px;
-          line-height: 1.4;
+        /* CodeMirror 5 styles for light theme */
+        .CodeMirror {
+          background-color: var(--vscode-sideBar-background) !important;
+          color: var(--vscode-sideBar-foreground) !important;
         }
         
-        #pad:focus {
-          border-color: var(--vscode-focusBorder);
-        }
-        
-        #pad::selection {
-          background-color: var(--vscode-textPreformat-background);
+        .CodeMirror-lines {
+          color: var(--vscode-sideBar-foreground) !important;
         }
       `;
     }
