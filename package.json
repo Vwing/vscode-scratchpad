@@ -1,0 +1,38 @@
+{
+  "name": "bottom-left-scratchpad",
+  "displayName": "Bottom-Left Scratchpad",
+  "description": "A simple always-on scratchpad beneath the Explorer sidebar.",
+  "version": "0.0.1",
+  "publisher": "your-name",
+  "engines": { "vscode": "^1.60.0" },
+
+  "activationEvents": [
+    "onView:bottomLeftScratchpad"
+  ],
+
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "bottomLeftScratchpad",
+          "name": "Scratchpad",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+
+  "main": "./out/extension.js",
+
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+
+  "devDependencies": {
+    "typescript": "^4.0.0",
+    "@types/vscode": "^1.60.0",
+    "@vscode/test-electron": "^2.0.0"
+  }
+}
