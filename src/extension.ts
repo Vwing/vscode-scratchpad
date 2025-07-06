@@ -22,18 +22,31 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
     const savedHeight =
       this.context.workspaceState.get<number>('scratchpadHeight') || 0;
 
-    // 2) Read indent size from settings
+    // 2) Read settings
     const config = vscode.workspace.getConfiguration('bottomLeftScratchpad');
     const indentSize = config.get<number>('indentSize', 2);
+
+    // 3) Get VS Code color theme
+    const colorTheme = vscode.window.activeColorTheme.kind;
+    const isDarkTheme = colorTheme === vscode.ColorThemeKind.Dark || 
+                       colorTheme === vscode.ColorThemeKind.HighContrast;
 
     const escaped = savedContent
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    // 3) Build the HTML, injecting savedHeight if present
+    // 4) Build CSS based on VS Code theme
+    const css = this.buildCSS(isDarkTheme);
+
+    // 5) Build the HTML, injecting savedHeight if present
     webviewView.webview.html = `<!DOCTYPE html>
 <html lang="en">
+  <head>
+    <style>
+      ${css}
+    </style>
+  </head>
   <body style="margin:0;padding:0;overflow:hidden;">
     <textarea
       id="pad"
@@ -165,7 +178,7 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
   </body>
 </html>`;
 
-    // 4) Handle both save & resize messages per‐workspace
+    // 6) Handle both save & resize messages per‐workspace
     webviewView.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'save') {
         await this.context.workspaceState.update('scratchContent', msg.content);
@@ -173,5 +186,57 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
         await this.context.workspaceState.update('scratchpadHeight', msg.height);
       }
     });
+  }
+
+  private buildCSS(isDarkTheme: boolean): string {
+    if (isDarkTheme) {
+      return `
+        body {
+          background-color: var(--vscode-editor-background);
+          color: var(--vscode-editor-foreground);
+        }
+        
+        #pad {
+          background-color: var(--vscode-editor-background);
+          color: var(--vscode-editor-foreground);
+          border: 1px solid var(--vscode-panel-border);
+          outline: none;
+          padding: 8px;
+          line-height: 1.4;
+        }
+        
+        #pad:focus {
+          border-color: var(--vscode-focusBorder);
+        }
+        
+        #pad::selection {
+          background-color: var(--vscode-textPreformat-background);
+        }
+      `;
+    } else {
+      return `
+        body {
+          background-color: var(--vscode-sideBar-background);
+          color: var(--vscode-sideBar-foreground);
+        }
+        
+        #pad {
+          background-color: var(--vscode-sideBar-background);
+          color: var(--vscode-sideBar-foreground);
+          border: 1px solid var(--vscode-panel-border);
+          outline: none;
+          padding: 8px;
+          line-height: 1.4;
+        }
+        
+        #pad:focus {
+          border-color: var(--vscode-focusBorder);
+        }
+        
+        #pad::selection {
+          background-color: var(--vscode-textPreformat-background);
+        }
+      `;
+    }
   }
 }
