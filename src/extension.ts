@@ -16,28 +16,37 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView) {
     webviewView.webview.options = { enableScripts: true };
 
-    // Load any saved notes
-    const saved = this.context.globalState.get<string>('scratchContent') || '';
-    const escaped = saved
+    // 1) Load saved notes and saved height (px)
+    const savedContent =
+      this.context.globalState.get<string>('scratchContent') || '';
+    const savedHeight =
+      this.context.globalState.get<number>('scratchpadHeight') || 0;
+
+    // 2) Read indent size from settings
+    const config = vscode.workspace.getConfiguration(
+      'bottomLeftScratchpad'
+    );
+    const indentSize = config.get<number>('indentSize', 2);
+
+    const escaped = savedContent
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    // Read indent size from user settings
-    const config = vscode.workspace.getConfiguration('bottomLeftScratchpad');
-    const indentSize = config.get<number>('indentSize', 2);
-
+    // 3) Build the HTML, injecting savedHeight if present
     webviewView.webview.html = `<!DOCTYPE html>
 <html lang="en">
   <body style="margin:0;padding:0;overflow:hidden;">
     <textarea
       id="pad"
-      rows="6"
+      ${savedHeight ? '' : 'rows="6"'}
       style="
         width:100%;
         box-sizing:border-box;
         font-family:var(--vscode-editor-font-family);
         font-size:var(--vscode-editor-font-size);
+        ${savedHeight ? `height:${savedHeight}px;` : ''}
+        resize:vertical;
       "
     >${escaped}</textarea>
 
@@ -47,7 +56,7 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
       const indentSize = ${indentSize};
       const indentStr = ' '.repeat(indentSize);
 
-      // Auto-save on any change
+      // Auto-save on any content change
       pad.addEventListener('input', () => {
         vscode.postMessage({ command: 'save', content: pad.value });
       });
@@ -58,7 +67,7 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
         const lineStart = value.lastIndexOf('\\n', sel - 1) + 1;
         const offset = sel - lineStart;
 
-        // Compute how many leading spaces this line has
+        // count full leading spaces this line
         let indentTotal = 0;
         while (
           indentTotal < value.length - lineStart &&
@@ -67,7 +76,7 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
           indentTotal++;
         }
 
-        // 1) ENTER: preserve entire indentTotal
+        // 1) ENTER → preserve indent
         if (e.key === 'Enter') {
           e.preventDefault();
           const line = value.slice(lineStart, sel);
@@ -77,65 +86,63 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
           pad.setRangeText(insert, sel, sel, 'end');
           pad.selectionStart = pad.selectionEnd = sel + insert.length;
 
-        // 2) TAB / SHIFT+TAB: only at start-of-line
+        // 2) TAB / SHIFT+TAB → indent/unindent at start
         } else if (e.key === 'Tab') {
           e.preventDefault();
           if (e.shiftKey) {
-            // unindent one chunk if possible
             if (indentTotal >= indentSize) {
-              pad.setRangeText('', lineStart, lineStart + indentSize, 'start');
+              pad.setRangeText(
+                '',
+                lineStart,
+                lineStart + indentSize,
+                'start'
+              );
               const newOffset = Math.max(0, offset - indentSize);
               pad.selectionStart = pad.selectionEnd = lineStart + newOffset;
             }
           } else {
-            // indent one chunk
             pad.setRangeText(indentStr, lineStart, lineStart, 'start');
             pad.selectionStart = pad.selectionEnd = sel + indentSize;
           }
 
-        // 3) BACKSPACE: smart-chunk delete if inside indent region
+        // 3) BACKSPACE → chunk-delete in indent region
         } else if (e.key === 'Backspace') {
           if (offset > 0 && offset <= indentTotal && indentTotal >= indentSize) {
             e.preventDefault();
-            // remove one indent chunk from the front
-            pad.setRangeText('', lineStart, lineStart + indentSize, 'start');
+            pad.setRangeText(
+              '',
+              lineStart,
+              lineStart + indentSize,
+              'start'
+            );
             const newOffset = Math.max(0, offset - indentSize);
             pad.selectionStart = pad.selectionEnd = lineStart + newOffset;
           }
-          // else fall through to default
+          // else default backspace
 
-        // 4) ARROW LEFT: step by chunk within indent region
+        // 4) / 5) Arrow keys → step by chunk in indent
         } else if (
-          e.key === 'ArrowLeft' &&
+          (e.key === 'ArrowLeft' || e.key === 'ArrowRight') &&
           !e.shiftKey && !e.ctrlKey && !e.altKey
         ) {
-          if (offset > 0 && offset <= indentTotal) {
+          const dir = e.key === 'ArrowLeft' ? -1 : +1;
+          if ((dir < 0 && offset > 0) || (dir > 0 && offset < indentTotal)) {
             e.preventDefault();
-            const newOffset = Math.max(0, offset - indentSize);
-            pad.selectionStart = pad.selectionEnd = lineStart + newOffset;
-          }
-          // else default
-
-        // 5) ARROW RIGHT: likewise
-        } else if (
-          e.key === 'ArrowRight' &&
-          !e.shiftKey && !e.ctrlKey && !e.altKey
-        ) {
-          if (offset < indentTotal) {
-            e.preventDefault();
-            const newOffset = Math.min(indentTotal, offset + indentSize);
+            const newOffset = Math.min(
+              indentTotal,
+              Math.max(0, offset + dir * indentSize)
+            );
             pad.selectionStart = pad.selectionEnd = lineStart + newOffset;
           }
         }
       });
 
-      // 6) CLICK: snap caret inside indent to nearest chunk
+      // 6) CLICK inside indent → snap to nearest chunk
       pad.addEventListener('mouseup', () => {
         const sel = pad.selectionStart;
         const value = pad.value;
         const lineStart = value.lastIndexOf('\\n', sel - 1) + 1;
         const offset = sel - lineStart;
-        // re-calc indentTotal
         let indentTotal = 0;
         while (
           indentTotal < value.length - lineStart &&
@@ -144,20 +151,33 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
           indentTotal++;
         }
         if (offset > 0 && offset < indentTotal) {
-          const nearest =
-            Math.round(offset / indentSize) * indentSize;
+          const nearest = Math.round(offset / indentSize) * indentSize;
           pad.selectionStart = pad.selectionEnd = lineStart + nearest;
         }
       });
+
+      // 🔔 Watch for manual resize (drag-resize) and persist height
+      new ResizeObserver(entries => {
+        for (const e of entries) {
+          const h = Math.round(e.contentRect.height);
+          vscode.postMessage({ command: 'resize', height: h });
+        }
+      }).observe(pad);
     </script>
   </body>
 </html>`;
 
+    // 4) Handle both save & resize messages
     webviewView.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'save') {
         await this.context.globalState.update(
           'scratchContent',
           msg.content
+        );
+      } else if (msg.command === 'resize') {
+        await this.context.globalState.update(
+          'scratchpadHeight',
+          msg.height
         );
       }
     });
