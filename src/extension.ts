@@ -48,28 +48,102 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
     </style>
   </head>
   <body style="margin:0;padding:0;overflow:hidden;">
-    <textarea
-      id="pad"
-      ${savedHeight ? '' : 'rows="6"'}
-      style="
-        width:100%;
+    <div id="container" style="position:relative;width:100%;${savedHeight ? `height:${savedHeight}px;` : 'height:auto;'}">
+      <div id="display" style="
+        position:absolute;
+        top:0;
+        left:0;
+        right:0;
+        bottom:0;
+        padding:8px;
         box-sizing:border-box;
-        font-family:var(--vscode-editor-font-family);
+        font-family:var(--vscode-editor-font-family, monospace);
         font-size:var(--vscode-editor-font-size);
-        ${savedHeight ? `height:${savedHeight}px;` : ''}
-        resize:vertical;
-      "
-    >${escaped}</textarea>
+        line-height:1.4;
+        white-space:pre-wrap;
+        word-wrap:break-word;
+        overflow-wrap:break-word;
+        overflow-y:auto;
+        pointer-events:none;
+      "></div>
+      <textarea
+        id="pad"
+        ${savedHeight ? '' : 'rows="6"'}
+        style="
+          position:absolute;
+          top:0;
+          left:0;
+          width:100%;
+          height:100%;
+          box-sizing:border-box;
+          font-family:var(--vscode-editor-font-family, monospace);
+          font-size:var(--vscode-editor-font-size);
+          line-height:1.4;
+          white-space:pre-wrap;
+          word-wrap:break-word;
+          overflow-wrap:break-word;
+          background:transparent;
+          resize:none;
+          padding:8px;
+        "
+      >${escaped}</textarea>
+      <div id="resizer" style="
+        position:absolute;
+        bottom:0;
+        right:0;
+        width:20px;
+        height:20px;
+        cursor:nwse-resize;
+        user-select:none;
+      "></div>
+    </div>
 
     <script>
       const vscode = acquireVsCodeApi();
       const pad = document.getElementById('pad');
+      const display = document.getElementById('display');
+      const container = document.getElementById('container');
+      const resizer = document.getElementById('resizer');
       const indentSize = ${indentSize};
       const indentStr = ' '.repeat(indentSize);
+
+      // Function to render text with hanging indents
+      function renderWithIndents(text) {
+        const lines = text.split('\\n');
+        display.innerHTML = '';
+        
+        lines.forEach((line, index) => {
+          const lineDiv = document.createElement('div');
+          lineDiv.style.position = 'relative';
+          lineDiv.style.minHeight = '1.4em';
+          
+          // Count leading spaces
+          let leadingSpaces = 0;
+          while (leadingSpaces < line.length && line[leadingSpaces] === ' ') {
+            leadingSpaces++;
+          }
+          
+          // Calculate indent in ch units (character width)
+          const indentWidth = leadingSpaces + 'ch';
+          
+          // Apply hanging indent
+          lineDiv.style.textIndent = '-' + indentWidth;
+          lineDiv.style.paddingLeft = indentWidth;
+          
+          // Set content
+          lineDiv.textContent = line || '\\u200B'; // Zero-width space for empty lines
+          
+          display.appendChild(lineDiv);
+        });
+      }
+
+      // Initial render
+      renderWithIndents(pad.value);
 
       // Auto-save on any content change
       pad.addEventListener('input', () => {
         vscode.postMessage({ command: 'save', content: pad.value });
+        renderWithIndents(pad.value);
       });
 
       pad.addEventListener('keydown', e => {
@@ -167,13 +241,47 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
         }
       });
 
-      // 🔔 Watch for manual resize (drag-resize) and persist height
-      new ResizeObserver(entries => {
-        for (const e of entries) {
-          const h = Math.round(e.contentRect.height);
+      // Sync scroll positions
+      pad.addEventListener('scroll', () => {
+        display.scrollTop = pad.scrollTop;
+        display.scrollLeft = pad.scrollLeft;
+      });
+
+      // Handle manual resizing
+      let isResizing = false;
+      let startY = 0;
+      let startHeight = 0;
+
+      resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = container.offsetHeight;
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const deltaY = e.clientY - startY;
+        const newHeight = Math.max(100, startHeight + deltaY);
+        container.style.height = newHeight + 'px';
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isResizing) {
+          isResizing = false;
+          const h = container.offsetHeight;
           vscode.postMessage({ command: 'resize', height: h });
         }
-      }).observe(pad);
+      });
+
+      // Set initial height if saved
+      const savedHeight = ${savedHeight};
+      if (savedHeight && savedHeight > 0) {
+        container.style.height = savedHeight + 'px';
+      } else {
+        // Default height based on rows
+        container.style.height = (6 * 1.4 * 16 + 16) + 'px'; // 6 rows * line-height * font-size + padding
+      }
     </script>
   </body>
 </html>`;
@@ -196,21 +304,43 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
           color: var(--vscode-editor-foreground);
         }
         
-        #pad {
-          background-color: var(--vscode-editor-background);
-          color: var(--vscode-editor-foreground);
+        #container {
           border: 1px solid var(--vscode-panel-border);
-          outline: none;
-          padding: 8px;
-          line-height: 1.4;
+          background-color: var(--vscode-editor-background);
         }
         
-        #pad:focus {
+        #container:focus-within {
           border-color: var(--vscode-focusBorder);
+        }
+        
+        #display {
+          color: var(--vscode-editor-foreground);
+          background-color: transparent;
+        }
+        
+        #display > div {
+          white-space: pre-wrap;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+        
+        #pad {
+          color: transparent;
+          caret-color: var(--vscode-editor-foreground);
+          outline: none;
+          border: none;
         }
         
         #pad::selection {
           background-color: var(--vscode-textPreformat-background);
+        }
+        
+        #resizer {
+          background: linear-gradient(135deg, transparent 50%, var(--vscode-scrollbarSlider-background) 50%);
+        }
+        
+        #resizer:hover {
+          background: linear-gradient(135deg, transparent 50%, var(--vscode-scrollbarSlider-hoverBackground) 50%);
         }
       `;
     } else {
@@ -220,21 +350,43 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
           color: var(--vscode-sideBar-foreground);
         }
         
-        #pad {
-          background-color: var(--vscode-sideBar-background);
-          color: var(--vscode-sideBar-foreground);
+        #container {
           border: 1px solid var(--vscode-panel-border);
-          outline: none;
-          padding: 8px;
-          line-height: 1.4;
+          background-color: var(--vscode-sideBar-background);
         }
         
-        #pad:focus {
+        #container:focus-within {
           border-color: var(--vscode-focusBorder);
+        }
+        
+        #display {
+          color: var(--vscode-sideBar-foreground);
+          background-color: transparent;
+        }
+        
+        #display > div {
+          white-space: pre-wrap;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+        
+        #pad {
+          color: transparent;
+          caret-color: var(--vscode-sideBar-foreground);
+          outline: none;
+          border: none;
         }
         
         #pad::selection {
           background-color: var(--vscode-textPreformat-background);
+        }
+        
+        #resizer {
+          background: linear-gradient(135deg, transparent 50%, var(--vscode-scrollbarSlider-background) 50%);
+        }
+        
+        #resizer:hover {
+          background: linear-gradient(135deg, transparent 50%, var(--vscode-scrollbarSlider-hoverBackground) 50%);
         }
       `;
     }
