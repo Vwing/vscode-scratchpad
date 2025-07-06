@@ -19,6 +19,17 @@
           "type": "webview"
         }
       ]
+    },
+    "configuration": {
+      "title": "Bottom-Left Scratchpad",
+      "properties": {
+        "bottomLeftScratchpad.indentSize": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "Number of spaces to use per indent level in the scratchpad."
+        }
+      }
     }
   },
 
