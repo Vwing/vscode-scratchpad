@@ -71,18 +71,9 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
         padding: 8px !important;
       }
       
-      /* Hanging indent for wrapped lines */
-      .CodeMirror-wrap pre {
-        padding-left: 0;
-        text-indent: 0;
-      }
-      
-      .CodeMirror .CodeMirror-line {
-        text-indent: 0;
-      }
-      
-      .CodeMirror-wrap .CodeMirror-line > span {
-        padding-left: 0;
+      /* CodeMirror 5 indented wrapping styles */
+      .CodeMirror pre > * {
+        text-indent: 0px;
       }
       
       .CodeMirror-cursor {
@@ -145,38 +136,17 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
         viewportMargin: Infinity
       });
       
-      // Custom hanging indent implementation
-      function updateHangingIndents() {
-        const wrapper = editor.getWrapperElement();
-        const lines = wrapper.querySelectorAll('.CodeMirror-line');
-        
-        lines.forEach((lineElement, index) => {
-          const lineText = editor.getLine(index);
-          if (!lineText) return;
-          
-          // Count leading spaces
-          let leadingSpaces = 0;
-          while (leadingSpaces < lineText.length && lineText[leadingSpaces] === ' ') {
-            leadingSpaces++;
-          }
-          
-          if (leadingSpaces > 0) {
-            const indentPx = leadingSpaces * 7; // Approximate char width
-            lineElement.style.textIndent = \`-\${indentPx}px\`;
-            lineElement.style.paddingLeft = \`\${indentPx}px\`;
-          } else {
-            lineElement.style.textIndent = '';
-            lineElement.style.paddingLeft = '';
-          }
-        });
-      }
+      // CodeMirror 5 official indented line wrapping implementation
+      const charWidth = editor.defaultCharWidth();
+      const basePadding = 4;
       
-      // Update hanging indents on content change
-      editor.on('change', updateHangingIndents);
-      editor.on('refresh', updateHangingIndents);
+      editor.on("renderLine", function(cm, line, elt) {
+        const off = CodeMirror.countColumn(line.text, null, cm.getOption("tabSize")) * charWidth;
+        elt.style.textIndent = "-" + off + "px";
+        elt.style.paddingLeft = (basePadding + off) + "px";
+      });
       
-      // Initial update
-      setTimeout(updateHangingIndents, 100);
+      editor.refresh();
       
       // Set height
       editor.setSize('100%', '100%');
