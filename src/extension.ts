@@ -16,16 +16,14 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
   resolveWebviewView(webviewView: vscode.WebviewView) {
     webviewView.webview.options = { enableScripts: true };
 
-    // 1) Load saved notes and saved height (px)
+    // 1) Load saved notes and saved height (px) per‐workspace
     const savedContent =
-      this.context.globalState.get<string>('scratchContent') || '';
+      this.context.workspaceState.get<string>('scratchContent') || '';
     const savedHeight =
-      this.context.globalState.get<number>('scratchpadHeight') || 0;
+      this.context.workspaceState.get<number>('scratchpadHeight') || 0;
 
     // 2) Read indent size from settings
-    const config = vscode.workspace.getConfiguration(
-      'bottomLeftScratchpad'
-    );
+    const config = vscode.workspace.getConfiguration('bottomLeftScratchpad');
     const indentSize = config.get<number>('indentSize', 2);
 
     const escaped = savedContent
@@ -167,18 +165,12 @@ class ScratchpadViewProvider implements vscode.WebviewViewProvider {
   </body>
 </html>`;
 
-    // 4) Handle both save & resize messages
+    // 4) Handle both save & resize messages per‐workspace
     webviewView.webview.onDidReceiveMessage(async msg => {
       if (msg.command === 'save') {
-        await this.context.globalState.update(
-          'scratchContent',
-          msg.content
-        );
+        await this.context.workspaceState.update('scratchContent', msg.content);
       } else if (msg.command === 'resize') {
-        await this.context.globalState.update(
-          'scratchpadHeight',
-          msg.height
-        );
+        await this.context.workspaceState.update('scratchpadHeight', msg.height);
       }
     });
   }
